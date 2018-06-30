@@ -1,20 +1,23 @@
 import random
 import tensorflow as tf
+import numpy as np
 from agents.dqn.dqn_replay_memory import ReplayMemory
 from agents.dqn.dqn_model import Model
-from agents.dqn.dqn_train_batch import train_batch
 from agents.dqn.dqn_preprocess import preprocess, resolution
 
 class DQNAgent():
-    def __init__(self, actions = []):
+    def __init__(self, actions = [], load_model=False):
         self.actions = actions
         self.discount_factor = 0.99
         session = tf.Session()
         self.model = Model(session, len(actions))
         saver = tf.train.Saver()
-        init = tf.global_variables_initializer()
-        session.run(init)
-        self.memory = ReplayMemory(capacity = 50000)
+        if load_model:
+            saver.restore(session, "./tmp/model.ckpt")
+        else:
+            init = tf.global_variables_initializer()
+            session.run(init)
+        self.memory = ReplayMemory()
 
     def get_exploration_rate(self, epoch, epochs):
         start_eps = 1.0
@@ -36,24 +39,18 @@ class DQNAgent():
             action = random.choice(self.actions) 
         else:
             state = preprocess(game_state.screen_buffer)
-            state = state.reshape([1, 1, resolution[0], resolution[1]])
-            best_action_index = self.model.get_best_action(state)
+            best_action_index = self.model.simple_get_best_action(state)
             action = self.actions[best_action_index]
         return action
 
     def update_policy(self, current_state, chosen_action, new_state, reward, is_done):
-        print("current_state", current_state)
-        print("chosen_action", chosen_action)
-        print("new_state", new_state)
-        print("reward", reward)
-        print("is_done", is_done)
         current_state = preprocess(current_state.screen_buffer)
         new_state = preprocess(new_state.screen_buffer) if not is_done else None
         chosen_action = self.actions.index(chosen_action)
         self.memory.add(current_state, chosen_action, new_state, reward, is_done)
 
         if self.memory.size > 64:
-            s1, a, s2, isterminal, r = self.memory.sample(32)
+            s1, a, s2, isterminal, r = self.memory.get_sample(64)
             q2 = np.max(self.model.get_q_values(s2), axis=1)
             target_q = self.model.get_q_values(s1)
             target_q[np.arange(target_q.shape[0]), a] = r + self.discount_factor * (1 - isterminal) * q2
